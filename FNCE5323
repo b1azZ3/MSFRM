@@ -1,0 +1,131 @@
+import numpy as np
+import pandas as pd
+from scipy.stats import norm
+import matplotlib.pyplot as plt
+
+# importing parameters
+file = 'FNCE5323_22Sm_Asgn1-Params.csv'
+data = pd.read_csv(file)
+df = pd.DataFrame(data)
+
+mu1 = df.at[0, 'Value']
+kappa1 = df.at[1, 'Value']
+sigma1 = df.at[2, 'Value']
+r01 = df.at[3, 'Value']
+n1 = df.at[4, 'Value']
+dt1 = df.at[5, 'Value']
+t1 = df.at[6, 'Value']
+dtau1 = df.at[7, 'Value']
+tau_t1 = df.at[8, 'Value']
+
+
+# define short rate simulation model
+def vsk_model(mu, kappa, sigma, r0, n, dt, t):
+    n = int(n)
+    itr = int(t / dt)
+    w = norm.ppf(np.random.random((n, itr + 1)))
+    rates = np.zeros(shape=(n, itr + 1), dtype='float')
+    for i in range(n):
+        rates[i, 0] = r0
+        for j in range(1, itr + 1):
+            rates[i, j] = kappa * mu * dt + (1 - kappa * dt) * rates[i, j - 1] + sigma * dt ** (1 / 2) * w[i, j]
+    return rates
+
+
+# define plot_vsk
+def plot_vsk(t, dt, rates, n, itr):
+    x = np.arange(0, t + 0.25, dt)
+    n = int(n)
+    for i in range(n):
+        plt.plot(x, rates[i, :])
+    # for j in range(itr):
+    #     itr = int(itr)
+    #     plt.plot(x, np.mean(rates[:, j]))
+    plt.show()
+    return
+
+
+# plotting
+rates = vsk_model(mu1, kappa1, sigma1, r01, n1, dt1, t1)
+plot_vsk(t1, dt1, rates, n1, t1 / dt1)
+
+
+# Zero-coupon bond pricing
+def zcb_pricing(kappa, tau_t, mu, sigma, dtau, n, dt, t):
+    n = int(n)
+    itr = int(tau_t / dtau)
+    tau = []
+    b_tau = []
+    a_tau = []
+    for j in range(1, itr + 1):
+        tau.append(j * dtau)
+    b_tau = [(1 - np.exp(-kappa * i)) / kappa for i in tau]
+
+    m = int(tau_t / dtau)
+    for i in range(m):
+        a_tau.append(np.exp(((b_tau[i] - i) * (kappa ** 2 * mu - sigma ** 2 / 2)) / kappa ** 2 - (
+                sigma ** 2 * b_tau[i] ** 2) / 4 * kappa))
+    l = int(t / dt)
+    z = np.zeros(shape=(n, l + 1, itr), dtype='float')
+    for i in range(n):
+        for h in range(l + 1):
+            for j in range(m):
+                z[i, h, j] = a_tau[j] * np.exp(-b_tau[j] * rates[i, h])
+    return z
+
+
+# print(zcb_pricing(kappa1, tau_t1, mu1, sigma1, dtau1, n1, dt1, t1))
+z = zcb_pricing(kappa1, tau_t1, mu1, sigma1, dtau1, n1, dt1, t1)
+# print(z.shape)
+
+# output csv
+time = []
+m = int(t1 / dt1) + 1
+for i in range(m):
+    time.append(i * 0.25)
+time = time * int(n1)
+time = pd.DataFrame(time)
+# print(time)
+
+scen = []
+k = int(n1)
+for i in range(k):
+    temp_scen = [i] * m
+    scen = scen + temp_scen
+scen = pd.DataFrame(scen)
+# print(len(scen))
+
+short_rates = []
+for i in range(k):
+    l = rates[i, :]
+    temp_rates = list(l)
+    short_rates = short_rates + temp_rates
+short_rates = pd.DataFrame(short_rates)
+# print(len(short_rates))
+
+price_tau1 = pd.DataFrame(z[0, ::])
+price_tau2 = pd.DataFrame(z[1, ::])
+price_taus = pd.concat([price_tau1, price_tau2], axis=0)
+for i in range(2, k):
+    price_tau_temp = pd.DataFrame(z[i, ::])
+    price_taus = pd.concat([price_taus, price_tau_temp], axis=0)
+price_taus = price_taus.reset_index(drop=True)
+# print(price_taus.shape)
+
+result_temp1 = pd.concat([scen, time], axis=1)
+result_temp2 = pd.concat([result_temp1, short_rates], axis=1)
+result = pd.concat([result_temp2, price_taus], axis=1)
+# print(result.shape)
+
+columns = ['Scen', 'Time', 'Short Rates', 'Price Tau 1', 'Price Tau 2', 'Price Tau 3',
+           'Price Tau 4', 'Price Tau 5', 'Price Tau 6', 'Price Tau 7', 'Price Tau 8',
+           'Price Tau 9', 'Price Tau 10', 'Price Tau 11', 'Price Tau 12', 'Price Tau 13',
+           'Price Tau 14', 'Price Tau 15', 'Price Tau 16', 'Price Tau 17', 'Price Tau 18',
+           'Price Tau 19', 'Price Tau 20']
+result.columns = columns
+
+# print(result.iloc[21])
+# print(result.iloc[0])
+# print(result.head(20))
+
+result.to_csv('Asgn1_Out_S7.csv', index=False)
