@@ -1,0 +1,157 @@
+import csv
+import random 
+import numpy as np 
+import pandas as pd
+from scipy.special import ndtri
+from scipy.interpolate import CubicSpline
+import math
+# D:/MSFRM/5323 Advanced Issues and Applications/vlad/Project/
+dir_name = 'D:/MSFRM/5323 Advanced Issues and Applications/vlad/Project/'
+inf_name = 'FNCE5323_22Sm_CVA-IRS-Params.csv'
+outf_name='CVA-IRS_S7_out.csv'
+finf_name=dir_name+inf_name
+foutf_name=dir_name+outf_name   
+# Reading OU parameters from FNCE5323_22Sm_Asgn1-Params.csv
+paramsf = open(finf_name,'r') #CSV file
+paramst = [] # Creating  a list for storing the parameters
+for row in csv.reader(paramsf):
+    paramst.append(row)
+paramsf.close()
+params=np.zeros(shape=(18,2),dtype='float') # array for the parameters values
+for i in range(1,13):
+    params[i-1,1] = float(paramst[i][1])
+for j in range(15, 21):
+    params[j-3,1] = float(paramst[j][1])
+for r in range(15, 21):
+    params[r-3, 0] = float(paramst[r][0])
+nmb_scn=int(params[4,1])
+scen_tlenth=int(params[6,1]/params[5,1])
+short_rates = np.zeros((nmb_scn, scen_tlenth+1)) # Creating an array for short rates(1000x41)
+scen_tau_lenth=int(params[8,1]/params[7,1])
+z_prices = np.zeros((nmb_scn, scen_tlenth+1,scen_tau_lenth)) # Creating an array for zero coupon prices(1000x41x40)
+  
+def OUB(params,tau):
+    return (1-math.exp(-params[1,1]*tau))/params[1,1]
+def OUA(params,tau):
+    kappa2=params[1,1]**2
+    sigma2=params[2,1]**2
+    OUB2=OUB(params,tau)*OUB(params,tau)
+    oua_rtn1=OUB(params,tau)-tau
+    oua_rtn2=oua_rtn1*(params[0,1]*kappa2-sigma2/2)/kappa2
+    oua_rtn3= OUB2*sigma2/(4*params[1,1])
+    oua_rtnp=oua_rtn2-oua_rtn3
+    oua_rtn=math.exp(oua_rtnp)
+    return oua_rtn
+def RunOU_1tProjs(params, curr_short_rate,curr_z_prices):
+    for i in range(0,scen_tlenth):
+        tau=(i+1)*params[7,1] # 0.25
+        curr_z_price=math.exp(-OUB(params,tau)*curr_short_rate)
+        curr_z_prices[i]=curr_z_price*OUA(params,tau)
+def RunOUz(params,nmb_scn, scen_tlenth, short_rates,z_prices):
+    for n in range(0,nmb_scn):
+        # Dealing with tau=0: The same initial value for all scenarios
+        short_rates[n,0]=params[3,1]  
+        curr_short_rate=short_rates[n,0]
+        curr_z_prices=np.zeros(scen_tau_lenth)
+        RunOU_1tProjs(params, curr_short_rate,curr_z_prices)
+        for i in range(0,scen_tau_lenth):
+            z_prices[n,0,i]=curr_z_prices[i]
+        for j in range(1,scen_tlenth+1):
+            short_rates[n,j]= short_rates[n,j-1]*(1-params[1,1]*params[5,1])
+            short_rates[n,j]= short_rates[n,j]+params[0,1]*params[1,1]*params[5,1]
+            short_rates[n,j]= short_rates[n,j]+params[2,1]*ndtri(random.random())*math.sqrt(params[5,1])
+            curr_short_rate=short_rates[n,j]
+            curr_z_prices=np.zeros(scen_tau_lenth)
+            RunOU_1tProjs(params, curr_short_rate,curr_z_prices)
+            for i in range(0,scen_tau_lenth):
+                z_prices[n,j,i]=curr_z_prices[i]
+    return(z_prices)
+RunOUz(params,nmb_scn, scen_tlenth, short_rates,z_prices)
+
+# defining leg fucntions
+def fxl(nmb_scn, scen_tlenth, params):
+    fixed_legs = np.zeros(shape=(nmb_scn, scen_tlenth+1), dtype='float')
+    for n in range(0, nmb_scn):
+        for j in range(0, scen_tlenth):
+            tau_mt = int((params[6,1]-j*params[5,1])/params[5,1])
+            result = z_prices[n, j, 0]
+            for i in range(1, tau_mt):
+                temp = z_prices[n, j, i]
+                result = result + temp
+            fixed_legs[n, j] = result
+    fixed_legs = fixed_legs * params[9,1] * params[5,1]
+    return fixed_legs
+fixed_legs = fxl(nmb_scn, scen_tlenth, params)
+
+def fll(nmb_scn, scen_tlenth, params):
+    floating_legs = np.zeros(shape=(nmb_scn, scen_tlenth+1), dtype='float')
+    for n in range (0, nmb_scn):
+        for j in range(0, scen_tlenth):
+            t_mt = int((params[6,1]-(j+1)*params[5,1])/params[5,1])
+            result = z_prices[n, j, t_mt]
+            result = 1- result
+            floating_legs[n, j] = result
+    return floating_legs
+floating_legs = fll(nmb_scn, scen_tlenth, params)
+
+mtm = fixed_legs - floating_legs
+mtm = np.transpose(mtm)
+
+# calculating EE & PFE
+expected_expo = np.nanmean(np.where(mtm>0, mtm, 0), axis=1)
+ranked_mtm = np.sort(mtm, axis=1)
+nmb_idx = round(params[10,1]*params[4,1])
+pf_expo = ranked_mtm[:, nmb_idx]
+
+# output vectors
+time_len = int(params[17,0]/params[5,1])
+time_dis = np.zeros(shape=(time_len+1), dtype='float')
+for i in range(time_len+1):
+    time_dis[i] = i*params[5, 1] # coloum t
+
+# credit spread
+def credit_curve(params):
+    t = np.zeros(6)
+    given_spread = np.zeros(6)
+    for r in range(12, 18):
+        t[r-12] = params[r, 0]
+        given_spread[r-12] = params[r, 1]
+    cubic_spline = CubicSpline(t, given_spread,bc_type='natural')
+    interpolated_spread = cubic_spline(time_dis)
+    return interpolated_spread
+interpolated_spread = credit_curve(params)
+
+# Prob of Default
+def default_prob(params):
+    prob_default = np.zeros(shape=(time_len+1), dtype='float')
+    for i in range(1, time_len+1):
+        prob_default[i] = np.exp(-interpolated_spread[i-1]*time_dis[i-1]*0.0001/params[11,1])
+        prob_default[i] = prob_default[i] - np.exp(-interpolated_spread[i]*time_dis[i]*0.0001/params[11,1])
+    return prob_default
+prob_default = default_prob(params)
+
+# calculating cva 
+sum_product = 0
+for i in range(scen_tlenth+1):
+    temp = prob_default[i]*expected_expo[i]
+    sum_product = sum_product + temp
+cva = -params[11,1]*sum_product
+risk_duration = (1-np.exp(-params[17,0]*params[17,1]*0.0001/params[11,1]))/(params[17,1]*0.0001/params[11,1])
+cva_approximation1 = 10**4*(cva/risk_duration)
+epe = np.average(expected_expo)
+cva_approximation2 = -epe*params[17,1]
+
+# Writing output file
+out_header=['Time(years)', 'Interpolated Credit Curve(Spread in bps)', 'Default Prob', 'EE']
+with open(foutf_name, mode='w', newline ='') as file_TW:
+    file_TW=csv.writer(file_TW, delimiter=',', quotechar='"', quoting=csv.QUOTE_MINIMAL)    
+    file_TW.writerow(out_header)
+    for n in range(time_len+1):
+        out_row = [time_dis[n], interpolated_spread[n], prob_default[n], expected_expo[n]]
+        file_TW.writerow(out_row)
+data = pd.read_csv(foutf_name)
+names = ['CVA', 'Risky Duration', 'CVA(bps)Approximation 1', 'EPE', 'CVA(bps)Approximation 2']
+values = [cva, risk_duration, cva_approximation1, epe, cva_approximation2]
+data['Names'] = pd.Series(names)
+data['Values'] = pd.Series(values)
+data.to_csv(foutf_name, mode='w', index=False)
