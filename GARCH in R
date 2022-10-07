@@ -1,0 +1,161 @@
+###Q1
+#(1)
+rm(list=ls())
+library('Ecdat')
+data('SP500',package='Ecdat')
+
+#(2)
+library('fGarch')
+r500 <- SP500[(1305:1804),1]
+fit2 <- garchFit(formula=~garch(1,1),data=r500,trace=FALSE)
+omega <- fit2@fit$coef[2]
+alpha <- fit2@fit$coef[3]
+beta <- fit2@fit$coef[4]
+
+#(3)
+sigma <- fit2@sigma.t
+plot(sigma,type='l')
+
+#(4)
+T <- length(r500)
+vol <- sqrt(omega+alpha*r500[T]^2+beta*sigma[T]^2)
+Prob1<- pnorm(-0.228,mean=0,sd=vol)
+
+
+#(5)
+stdret <- r500/sigma
+par(mfrow=c(2,2))
+acf(r500,ylim=c(0,1))
+acf(stdret, ylim=c(0,1))
+acf(r500^2, ylim=c(0,1))
+acf(stdret^2, ylim=c(0,1))
+
+#(6)
+qqnorm(stdret,main='Standardized S&P500 Returns')
+qqline(stdret,col='red')
+
+#(7)
+fit3 <- garchFit(formula = ~garch(1, 1), data =SP500$r500, trace = FALSE, cond.dist = 'std')
+omega1 <- fit3@fit$coef[2]   
+alpha1 <- fit3@fit$coef[3]   
+beta1  <- fit3@fit$coef[4]  
+shape1 <- fit3@fit$coef[5]
+sigma1 <- fit3@sigma.t
+sigmapred1 <- sqrt(omega1 + alpha1*SP500$r500[1804]^2 + beta1*sigma1[1804]^2)
+Prob2 <- pnorm(-0.228, mean=0, sd=sigmapred1)
+Prob3 <- pt(-0.228, df=shape1)
+
+
+###Q2
+#A
+rm(list=ls())
+library(quantmod)
+BAC <-  getSymbols("BAC",src='yahoo',from="2000-01-03",to="2022-03-21",auto.assign=FALSE)
+price<- BAC$BAC.Close
+plot(price,col='red',type='l')
+
+#B
+T <- length(price)
+ret <- diff(log(price))
+ind <- which(ret!=0)
+ret <- ret[ind]
+T <- length(ret)
+library('fGarch')
+var1_garch <- numeric(T)
+for (i in 501:T){
+  retwindow <- ret[(i-500):(i-1)]
+  fit2 <- garchFit( formula = ~garch(1, 1), data = retwindow, trace = FALSE)
+  omega <- fit2@fit$coef[2]
+  alpha <- fit2@fit$coef[3]
+  beta  <- fit2@fit$coef[4]
+  sigma <- fit2@sigma.t
+  sigmapred <- sqrt(omega + alpha*retwindow[500]^2 + beta*sigma[500]^2)
+  var1_garch[i] <- -qnorm(0.01, mean=0, sd=sigmapred)
+}
+plot(var1_garch,type='l',col='green')
+
+#C
+var1_fhs <- numeric(T)
+for (i in 501:T){
+  retwindow <- ret[(i-500):(i-1)]
+  fit2 <- garchFit( formula = ~garch(1, 1), data = retwindow, trace = FALSE)
+  omega <- fit2@fit$coef[2]
+  alpha <- fit2@fit$coef[3]
+  beta  <- fit2@fit$coef[4]
+  sigma <- fit2@sigma.t
+  sigmapred <- sqrt(omega + alpha*retwindow[500]^2 + beta*sigma[500]^2)
+  retstand <- retwindow/sigma
+  var1_fhs[i]  <- -sigmapred*quantile(retstand, probs=0.01)
+}
+plot(var1_fhs,col='red',type='l',lwd=2)
+points(var1_garch,col='green',type='l',lwd=2)
+
+#D
+qqnorm(ret,main='BAC Returns')
+qqline(ret,col='red')
+#unconditional non-normality
+
+#E
+qqnorm(retstand,main='Standardized s&p500 Returns')
+qqline(retstand,col='red')
+#conditional non-normality
+
+#F
+rm(list=ls())
+library(quantmod)
+BAC <-  getSymbols("BAC",src='yahoo',from="2000-01-03",to="2022-03-21",auto.assign=FALSE)
+AAPL <- getSymbols("AAPL",src='yahoo',from="2000-01-03",to="2022-03-21",auto.assign=FALSE)
+BP <- getSymbols("BP",src='yahoo',from="2000-01-03",to="2022-03-21",auto.assign=FALSE)
+PBAC <- BAC$BAC.Close
+PAAPL <- AAPL$AAPL.Close
+PBP <- BP$BP.Close
+T <- length(PBAC)
+RetBAC <- diff(log(PBAC))
+RetAAPL <- diff(log(PAAPL))
+RetBP <- diff(log(PBP))
+RetP <- 1/3*(RetBAC+RetAAPL+RetBP)
+ind <- which(RetP!=0)
+RetP <- RetP[ind]
+T <- length(RetP)
+library('fGarch')
+var1_fhs <- numeric(T)
+var1_garch <- numeric(T)
+for (i in 501:T){
+  retwindow <- RetP[(i-500):(i-1)]
+  fit2 <- garchFit( formula = ~garch(1, 1), data = retwindow, trace = FALSE)
+  omega <- fit2@fit$coef[2]
+  alpha <- fit2@fit$coef[3]
+  beta  <- fit2@fit$coef[4]
+  sigma <- fit2@sigma.t
+  sigmapred <- sqrt(omega + alpha*retwindow[500]^2 + beta*sigma[500]^2)
+  retstand <- retwindow/sigma
+  var1_garch[i] <- -qnorm(0.01, mean=0, sd=sigmapred)
+  var1_fhs[i]<- -sigmapred*quantile(retstand, probs=0.01)
+}
+plot(var1_fhs, col='red', type='l', ylim=c(0,0.5), lwd=4)
+points(var1_garch, col='blue', type='l', lwd=4)
+
+###Q3
+#(1)
+rm(list=ls())
+t_5 <- rt(10000,df=5)
+t_20 <- rt(10000,df=20)
+t_100 <- rt(10000,df=100)
+mean_5 <- mean(t_5)
+mean_20 <- mean(t_20)
+mean_100 <- mean(t_100)
+sd_5 <- sd(t_5)
+sd_20 <- sd(t_20)
+sd_100 <- sd(t_100)
+
+#(2)
+scale_5 <- scale(x=t_5)
+scale_20 <- scale(x=t_20)
+scale_100 <- scale(x=t_100)
+par(mfrow=c(1,3))
+qqnorm(scale_5, main='Student t distribution with df=5')
+qqline(scale_5, col='red')
+qqnorm(scale_20, main='Student t distribution with df=20')
+qqline(scale_20, col='red')
+qqnorm(scale_100, main='Student t distribution with df=100')
+qqline(scale_100, col='red')
