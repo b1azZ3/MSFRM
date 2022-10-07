@@ -1,0 +1,207 @@
+###Question 1
+
+rm(listl=ls())
+library('quantmod')
+
+#A
+getSymbols('VIIIX',from="1998-01-01",to="2022-04-05")
+price <- VIIIX$VIIIX.Adjusted
+retVIIIX <- diff(log(price))
+retVIIIX <- as.numeric(retVIIIX[-1])
+
+getSymbols('VGTSX', from ="1998-01-01", to = "2022-04-05")
+price <- VGTSX[,6]
+retVGTSX <- diff(log(price))
+retVGTSX <- as.numeric(retVGTSX[-1])
+T <- length(retVGTSX)
+cor(retVIIIX,retVGTSX)
+
+#B
+library('fGarch')
+fit1 <- garchFit( formula = ~garch(1, 1), data = retVGTSX, trace = FALSE)
+sigma1 <- fit1@sigma.t
+retVGTSXstand <- retVGTSX/sigma1
+
+fit2 <- garchFit( formula = ~garch(1, 1), data = retVIIIX, trace = FALSE)
+sigma2 <- fit2@sigma.t
+retVIIIXstand <- retVIIIX/sigma2
+
+lambda <- 0.94
+q11 <- numeric(T)
+q12 <- numeric(T)
+q22 <- numeric(T)
+
+for (i in 2:T){
+  q11[i] <- (1-lambda)*retVGTSXstand[i-1]^2 + lambda*q11[i-1]
+  q22[i] <- (1-lambda)*retVIIIXstand[i-1]^2 + lambda*q22[i-1]
+  q12[i] <- (1-lambda)*retVGTSXstand[i-1]*retVIIIXstand[i-1] + lambda*q12[i-1]
+}
+
+rmcor <- q12/sqrt(q11*q22)
+plot(rmcor,type='l',col='blue',ylim=c(-0.2,1),lwd=4)
+abline(h=0, lwd=2, col='red')
+
+#C
+alpha <- 0.05
+beta <- 0.9
+q11 <- numeric(T)
+q12 <- numeric(T)
+q22 <- numeric(T)
+q11lr <- mean(retVGTSXstand^2)
+q12lr <- mean(retVGTSXstand*retVIIIXstand)
+q22lr <- mean(retVIIIXstand^2)
+
+for (i in 2:T){
+  q11[i] <- (1-alpha-beta)*q11lr + alpha*retVGTSXstand[i-1]^2 + beta*q11[i-1]
+  q22[i] <- (1-alpha-beta)*q22lr + alpha*retVIIIXstand[i-1]^2 + beta*q22[i-1]
+  q12[i] <- (1-alpha-beta)*q12lr + alpha*retVGTSXstand[i-1]*retVIIIXstand[i-1] + beta*q12[i-1]
+}
+
+Garchcor <- q12/sqrt(q11*q22)
+plot(Garchcor, type='l', col='blue',ylim=c(-0.2,1), lwd=4)
+abline(h=0, lwd=2, col='red')
+
+#D
+plot(Garchcor, type='l', col='blue',ylim=c(-0.2,1), lwd=4)
+points(rmcor,type='l',col='red',ylim=c(-0.2,1),lwd=4)
+abline(h=0, lwd=2, col='green')
+
+
+
+
+###Q2
+rm(list=ls())
+
+#A
+MC <- 50000
+T  <- 500
+shock <- matrix(0, MC, T)
+for (i in 1:T){
+  shock[, i] <- rnorm(MC, 0, 1)
+}
+returnMC <- matrix(NA, MC, T)
+for (i in 1:MC){
+  sigmapredMC <- 0.01
+  for (j in 1:T){
+    returnMC[i, j] <- sigmapredMC*shock[i, j]
+    sigmapredMC <- sqrt(0.94*sigmapredMC^2 + 0.06*returnMC[i, j]^2)
+  }
+}
+returnMCT <- matrix(NA, MC, T)
+for (i in 1:MC){
+  returnMCT[i, ] <- cumsum(returnMC[i, ]) 
+}
+
+varmc <- numeric(T)
+for(i in 1:T){
+  varmc[i] <- quantile(returnMCT[,i],probs=0.05)
+}
+plot(varmc/sqrt(1:T)/varmc[1],type='l',lwd=4)
+#B
+#Theoretical value is 1.
+
+#C
+rm(list=ls())
+omega <- 1e-6
+alpha <- 0.05
+beta <- 0.9
+sigmapred1 <- 2*sqrt(omega/(1-alpha-beta))
+MC <- 10000
+T  <- 500
+shock <- matrix(0, MC, T)
+for (i in 1:T){
+  shock[, i] <- rnorm(MC, 0, 1)
+}
+
+returnMC1 <- matrix(NA, MC, T)
+for (i in 1:MC){
+  sigmapredMC1 <- sigmapred1
+  for (j in 1:T){
+    returnMC1[i, j] <- sigmapredMC1*shock[i, j]
+    sigmapredMC1 <- sqrt(omega + alpha*returnMC1[i, j]^2 + beta*sigmapredMC1^2)
+  }
+}
+
+returnMCT1 <- matrix(NA,MC,T)
+for(i in 1:MC){
+  returnMCT1[i,] <- cumsum(returnMC1[i,])
+}
+
+varmc1 <- numeric(T)
+for (i in 1:T){
+  varmc1[i] <- -quantile(returnMCT1[,i], probs=0.05)
+}
+plot(varmc1/sqrt(1:T)/varmc1[1], type='l', lwd=4)
+#D
+#(1)
+sigmapred2 <- 1*sqrt(omega/(1-alpha-beta))
+MC <- 10000
+T  <- 500
+shock <- matrix(0, MC, T)
+for (i in 1:T){
+  shock[, i] <- rnorm(MC, 0, 1)
+}
+
+returnMC2 <- matrix(NA, MC, T)
+for (i in 1:MC){
+  sigmapredMC2 <- sigmapred2
+  for (j in 1:T){
+    returnMC2[i, j] <- sigmapredMC2*shock[i, j]
+    sigmapredMC2 <- sqrt(omega + alpha*returnMC2[i, j]^2 + beta*sigmapredMC2^2)
+  }
+}
+returnMCT2 <- matrix(NA,MC,T)
+for(i in 1:MC){
+  returnMCT2[i,] <- cumsum(returnMC2[i,])
+}
+
+varmc2 <- numeric(T)
+for (i in 1:T){
+  varmc2[i] <- -quantile(returnMCT2[,i], probs=0.05)
+}
+
+#(2)
+sigmapred3 <- 0.5*sqrt(omega/(1-alpha-beta))
+MC <- 10000
+T  <- 500
+shock <- matrix(0, MC, T)
+for (i in 1:T){
+  shock[, i] <- rnorm(MC, 0, 1)
+}
+
+returnMC3 <- matrix(NA, MC, T)
+for (i in 1:MC){
+  sigmapredMC3 <- sigmapred3
+  for (j in 1:T){
+    returnMC3[i, j] <- sigmapredMC3*shock[i, j]
+    sigmapredMC3 <- sqrt(omega + alpha*returnMC3[i, j]^2 + beta*sigmapredMC3^2)
+  }
+}
+returnMCT3 <- matrix(NA,MC,T)
+for(i in 1:MC){
+  returnMCT3[i,] <- cumsum(returnMC3[i,])
+}
+
+varmc3 <- numeric(T)
+for (i in 1:T){
+  varmc3[i] <- -quantile(returnMCT3[,i], probs=0.05)
+}
+
+par(mfrow=c(1,3))
+plot(varmc1/sqrt(1:T)/varmc1[1], type='l', lwd=4)
+plot(varmc2/sqrt(1:T)/varmc2[1], type='l', lwd=4)
+plot(varmc3/sqrt(1:T)/varmc3[1], type='l', lwd=4)
+
+#E
+sigma <- sqrt(omega/(1-alpha-beta))
+yy <- numeric(T)
+yyC <- numeric(T)
+Theoretical <- numeric(T)
+for(i in 1:T){
+  yy[i] <- (sigmapred1^2-sigma^2)*(alpha+beta)^(i-1)
+  yyC[i] <- cumsum(yy[i])
+  Theoretical[i] <- sqrt(i*sigma^2+yyC[i])
+}
+
+plot(varmc1/Theoretical,type='l',lwd=4,ylim=c(0,3))
+abline(h=1,col='red')
